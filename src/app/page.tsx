@@ -1,0 +1,135 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
+import { GUARDIAN_DATA } from '@/data/guardians';
+import { getStoredState } from '@/utils/storage';
+import type { GuardiansState } from '@/types/guardian';
+
+export default function DashboardPage() {
+  const router = useRouter();
+  // `mounted` gates all browser-only reads (localStorage) so the server HTML
+  // and the first client paint always match — no hydration mismatch, no blank UI.
+  const [mounted, setMounted] = useState(false);
+  const [state, setState] = useState<GuardiansState | null>(null);
+
+  useEffect(() => {
+    // Read browser-only storage once, after hydration. This is the
+    // documented "you might not need an effect" exception: localStorage
+    // is an external system unavailable during SSR, so we sync it here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+    setState(getStoredState());
+  }, []);
+
+  // Static, SSR-safe source of truth — all 4 slots always render.
+  const guardianList = Object.values(GUARDIAN_DATA);
+  const unlockedCount =
+    mounted && state ? guardianList.filter((g) => Boolean(state.cards[g.id])).length : 0;
+  const isAllUnlocked = unlockedCount === 4;
+
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-between bg-stone-950 p-4 text-amber-50">
+      {/* Header */}
+      <div className="w-full">
+        <header className="mb-6 flex items-center justify-between border-b border-stone-800/80 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-full border-2 border-amber-400 bg-amber-950/40 text-lg font-bold text-amber-400">
+              4
+            </div>
+            <div>
+              <h1 className="text-sm font-extrabold uppercase tracking-widest text-amber-400">
+                GUARDIANS
+              </h1>
+              <p className="text-xs text-stone-400">4 ผู้พิทักษ์ตลาดพลู</p>
+            </div>
+          </div>
+          <div className="rounded-full border border-stone-700 bg-stone-900 px-3 py-1.5 text-xs text-stone-300">
+            สะสม {mounted ? unlockedCount : '…'}/4
+          </div>
+        </header>
+
+        {/* 2x2 Grid — skeleton while mounting, then all 4 slots */}
+        {!mounted ? (
+          <div className="my-2 grid grid-cols-2 gap-3.5" aria-label="กำลังโหลดคอลเลกชัน">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="aspect-[9/16] animate-pulse rounded-2xl border border-stone-800 bg-stone-900/70"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="my-2 grid grid-cols-2 gap-3.5">
+            {guardianList.map((g) => {
+              const collected = state?.cards[g.id] ?? null;
+              const isUnlocked = Boolean(collected);
+              return (
+                <button
+                  type="button"
+                  key={g.id}
+                  onClick={() => router.push(`/scan/${g.id}` as Route)}
+                  aria-label={`${g.title} ${isUnlocked ? 'ปลดล็อกแล้ว' : 'ยังไม่ปลดล็อก'}`}
+                  className={`relative aspect-[9/16] cursor-pointer overflow-hidden rounded-2xl border transition-all duration-300 active:scale-95 ${
+                    isUnlocked
+                      ? 'border-amber-400 shadow-lg shadow-amber-950/60 ring-1 ring-amber-400/50'
+                      : 'border-stone-800 bg-stone-900/60'
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={g.image}
+                    alt={g.title}
+                    className={`h-full w-full object-cover transition duration-300 ${
+                      isUnlocked ? 'opacity-100 grayscale-0' : 'opacity-25 grayscale'
+                    }`}
+                  />
+
+                  {!isUnlocked && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 p-3 text-center">
+                      <div className="mb-2 flex size-8 items-center justify-center rounded-full border border-stone-700 bg-stone-800/90 text-sm text-stone-300">
+                        🔒
+                      </div>
+                      <span className="line-clamp-1 text-xs font-semibold text-stone-200">
+                        {g.title}
+                      </span>
+                      <span className="mt-1 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+                        ทิศ {g.directionThai}
+                      </span>
+                    </div>
+                  )}
+
+                  {isUnlocked && collected && (
+                    <div className="absolute inset-x-2 bottom-2 rounded-lg border border-amber-400/30 bg-black/70 p-1.5 text-center backdrop-blur-md">
+                      <span className="block truncate text-[10px] font-medium text-amber-300">
+                        ✨ {collected.blessing}
+                      </span>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Footer Action */}
+      <footer className="mt-4 py-4">
+        {isAllUnlocked ? (
+          <button
+            type="button"
+            onClick={() => router.push('/final-card')}
+            className="w-full animate-bounce rounded-xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 py-3.5 font-extrabold tracking-wide text-black shadow-xl transition hover:brightness-110 active:scale-95"
+          >
+            🎉 รวมร่างรูปที่ 5 (The 4th Guardian)
+          </button>
+        ) : (
+          <p className="text-center text-xs text-stone-500">
+            แตะที่การ์ดเพื่อทดลองเข้าสู่จุดสแกน หรือสะสมให้ครบ 4 ใบ
+          </p>
+        )}
+      </footer>
+    </main>
+  );
+}
