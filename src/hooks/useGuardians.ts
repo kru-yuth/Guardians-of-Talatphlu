@@ -1,16 +1,20 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import type { GuardianId, GuardiansState } from "@/types/guardian";
+import type {
+  AppStorageState,
+  FifthGuardianSubmission,
+  GuardianId,
+} from "@/types/guardian";
 import {
-  collectCard as collectCardStore,
-  markCompleted as markCompletedStore,
+  awakenGuardian as awakenGuardianStore,
   readState,
   resetState as resetStore,
-  setPlayerName as setNameStore,
+  saveUserName as setNameStore,
+  submitFifthGuardian as submitFifthGuardianStore,
 } from "@/utils/storage";
 
-let currentState: GuardiansState | null = readState();
+let currentState: AppStorageState | null = readState();
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -20,11 +24,11 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-function getSnapshot(): GuardiansState | null {
+function getSnapshot(): AppStorageState | null {
   return currentState;
 }
 
-function getServerSnapshot(): GuardiansState | null {
+function getServerSnapshot(): AppStorageState | null {
   return null;
 }
 
@@ -42,20 +46,23 @@ export function useGuardians() {
     emitChanges();
   }, []);
 
-  const collect = useCallback((id: GuardianId, blessing: string) => {
-    collectCardStore(id, blessing);
+  const awaken = useCallback((id: GuardianId, answers: Record<string, string>) => {
+    awakenGuardianStore(id, answers);
     emitChanges();
   }, []);
 
-  const markCompleted = useCallback(() => {
-    markCompletedStore();
-    emitChanges();
-  }, []);
+  const submitFifthGuardian = useCallback(
+    (submission: Omit<FifthGuardianSubmission, "completedAt">) => {
+      submitFifthGuardianStore(submission);
+      emitChanges();
+    },
+    []
+  );
 
   const reset = useCallback(() => {
     resetStore();
     emitChanges();
   }, []);
 
-  return { state, setName, collect, markCompleted, reset };
+  return { state, setName, awaken, submitFifthGuardian, reset };
 }

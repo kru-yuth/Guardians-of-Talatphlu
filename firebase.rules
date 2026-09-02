@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. คอลเลกชันคำตอบแต่ละจุดสแกน (Tiger, Lion, Dragon, Horse)
+    match /guardian_checkpoints/{docId} {
+      allow read: if true; // ให้อ่านสำหรับหน้า Dashboard
+      allow create: if true; // ให้บันทึกคำตอบได้
+      allow update, delete: if false; // ห้ามแก้ไขหรือลบ
+    }
+    
+    // 2. คอลเลกชันคำอธิษฐานและคำสัญญาใบที่ 5 (The 5th Guardian)
+    match /fifth_guardian_submissions/{docId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+  }
+}

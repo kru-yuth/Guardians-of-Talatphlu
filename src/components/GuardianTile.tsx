@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CollectedCard, Guardian } from "@/types/guardian";
+import type { GuardianMeta, UserProgress } from "@/types/guardian";
 import { formatThaiDate } from "@/utils/storage";
 
 function LockIcon() {
@@ -21,17 +21,17 @@ function LockIcon() {
 }
 
 interface GuardianTileProps {
-  guardian: Guardian;
+  guardian: GuardianMeta;
   unlocked: boolean;
-  collected?: CollectedCard | null;
+  progress?: UserProgress | null;
   index: number;
 }
 
-export default function GuardianTile({ guardian, unlocked, collected, index }: GuardianTileProps) {
+export default function GuardianTile({ guardian, unlocked, progress, index }: GuardianTileProps) {
   return (
     <Link
       href={`/scan/${guardian.id}`}
-      aria-label={`${guardian.title} ${unlocked ? "ปลดล็อกแล้ว" : "ยังไม่ปลดล็อก"}`}
+      aria-label={`${guardian.titleTh} ${unlocked ? "ปลุกแล้ว" : "ยังไม่ปลุก"}`}
       className={`group relative block aspect-[3/4] overflow-hidden rounded-2xl border-2 transition ${
         unlocked
           ? "border-gold/70 shadow-[0_10px_40px_-12px_rgba(255,215,0,0.35)]"
@@ -40,8 +40,8 @@ export default function GuardianTile({ guardian, unlocked, collected, index }: G
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={guardian.image}
-        alt={`${guardian.title} (ธาตุ${guardian.elementThai})`}
+        src={guardian.cardImageUrl}
+        alt={`${guardian.titleTh} (${guardian.element})`}
         className={`h-full w-full object-cover transition duration-500 ${
           unlocked ? "group-hover:scale-105" : "blur-[1.5px] grayscale"
         }`}
@@ -51,26 +51,30 @@ export default function GuardianTile({ guardian, unlocked, collected, index }: G
         <div className="absolute inset-0 grid place-items-center bg-ink/55 backdrop-blur-[1px]">
           <span className="flex flex-col items-center gap-2 text-cream/80">
             <LockIcon />
-            <span className="text-[11px] font-semibold tracking-wide">สแกน QR เพื่อปลดล็อก</span>
+            <span className="text-[11px] font-semibold tracking-wide">ผ่านพิธีปลุกเพื่อเก็บพลัง</span>
           </span>
         </div>
       )}
 
       {unlocked && (
-        <div
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-3 pt-10"
-        >
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-3 pt-10">
           <span
             className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-widest"
-            style={{ color: guardian.accent, borderColor: guardian.accent, backgroundColor: "rgba(0,0,0,0.45)" }}
+            style={{
+              color: guardian.themeColor.accent,
+              borderColor: guardian.themeColor.accent,
+              backgroundColor: "rgba(0,0,0,0.45)",
+            }}
           >
-            {guardian.elementThai} · ปลดล็อกแล้ว
+            {guardian.element} · ปลุกแล้ว
           </span>
-          {collected?.blessing && (
-            <p className="mt-2 text-[13px] font-medium leading-snug text-cream">{collected.blessing}</p>
-          )}
-          {collected && (
-            <p className="mt-1 text-[11px] text-cream/60">{formatThaiDate(collected.unlockedAt)}</p>
+          <p className="mt-2 text-[13px] font-medium leading-snug text-cream">
+            {guardian.quote.th}
+          </p>
+          {progress?.unlockedAt && (
+            <p className="mt-1 text-[11px] text-cream/60">
+              {formatThaiDate(progress.unlockedAt)}
+            </p>
           )}
         </div>
       )}

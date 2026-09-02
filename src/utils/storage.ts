@@ -1,55 +1,102 @@
-import type { GuardianId, GuardiansState } from "@/types/guardian";
-import { GUARDIAN_ORDER } from "@/data/guardians";
+import {
+  GUARDIAN_ORDER,
+} from "@/data/guardians";
+import type {
+  AppStorageState,
+  FifthGuardianSubmission,
+  GuardianId,
+  UserProgress,
+} from "@/types/guardian";
 
-export const STORAGE_KEY = "talatphlu_guardians_state_v1";
+export const STORAGE_KEY = "talatphlu_guardians_state_v2";
 
-const EMPTY_CARDS = (): GuardiansState["cards"] => ({
-  fire: null,
-  earth: null,
-  wind: null,
-  water: null,
+const EMPTY_GUARDIANS = (): Record<GuardianId, UserProgress> => ({
+  fire: { unlocked: false, unlockedAt: null, answers: {} },
+  earth: { unlocked: false, unlockedAt: null, answers: {} },
+  wind: { unlocked: false, unlockedAt: null, answers: {} },
+  water: { unlocked: false, unlockedAt: null, answers: {} },
 });
 
 /**
  * In-memory fallback so the app keeps working when localStorage is
  * unavailable (private browsing, sandboxed iframes, storage blocked).
  */
-const memoryState: { value: GuardiansState | null } = { value: null };
+const memoryState: { value: AppStorageState | null } = { value: null };
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function defaultState(): GuardiansState {
+function defaultState(): AppStorageState {
   return {
-    version: 1,
-    playerName: "",
-    cards: EMPTY_CARDS(),
+    version: 2,
+    userName: "",
+    guardians: EMPTY_GUARDIANS(),
+    fifthGuardian: null,
     createdAt: new Date().toISOString(),
+    lastActiveDate: getTodayDateString(),
   };
 }
 
+/** Local calendar date, e.g. "2026-09-02". */
+const getTodayDateString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 /** Read the persisted state. Returns `null` when nothing is stored yet. */
-export function readState(): GuardiansState | null {
+export function readState(): AppStorageState | null {
   if (!canUseStorage()) return memoryState.value;
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<GuardiansState>;
-    if (!parsed || parsed.version !== 1) return null;
+    const parsed = JSON.parse(raw) as Partial<AppStorageState>;
+    if (!parsed || parsed.version !== 2) return null;
+
+    // Daily midnight reset: every new day starts a fresh ritual.
+    const today = getTodayDateString();
+    if (parsed.lastActiveDate !== today) {
+      const resetState: AppStorageState = {
+        version: 2,
+        userName: typeof parsed.userName === "string" ? parsed.userName : "",
+        lastActiveDate: today,
+        guardians: EMPTY_GUARDIANS(),
+        fifthGuardian: null,
+        createdAt:
+          typeof parsed.createdAt === "string" ? parsed.createdAt : new Date().toISOString(),
+      };
+      saveState(resetState);
+      return resetState;
+    }
 
     const merged = defaultState();
-    if (typeof parsed.playerName === "string") merged.playerName = parsed.playerName;
+    if (typeof parsed.userName === "string") merged.userName = parsed.userName;
     if (typeof parsed.createdAt === "string") merged.createdAt = parsed.createdAt;
-    if (typeof parsed.completedAt === "string") merged.completedAt = parsed.completedAt;
-    if (parsed.cards && typeof parsed.cards === "object") {
+    if (parsed.guardians && typeof parsed.guardians === "object") {
       for (const id of GUARDIAN_ORDER) {
-        const card = (parsed.cards as Record<string, unknown>)[id];
-        if (card && typeof card === "object") {
-          merged.cards[id] = card as GuardiansState["cards"][GuardianId];
+        const entry = (parsed.guardians as Record<string, Partial<UserProgress> | undefined>)[id];
+        if (entry && typeof entry === "object") {
+          merged.guardians[id] = {
+            unlocked: Boolean(entry.unlocked),
+            unlockedAt: typeof entry.unlockedAt === "string" ? entry.unlockedAt : null,
+            answers:
+              entry.answers && typeof entry.answers === "object" ? { ...entry.answers } : {},
+          };
         }
       }
+    }
+    if (parsed.fifthGuardian && typeof parsed.fifthGuardian === "object") {
+      const f = parsed.fifthGuardian as Partial<FifthGuardianSubmission>;
+      merged.fifthGuardian = {
+        talatphluBlessing: typeof f.talatphluBlessing === "string" ? f.talatphluBlessing : "",
+        personalPromise: typeof f.personalPromise === "string" ? f.personalPromise : "",
+        finalImageUrl: typeof f.finalImageUrl === "string" ? f.finalImageUrl : "",
+        completedAt: typeof f.completedAt === "string" ? f.completedAt : "",
+      };
     }
     return merged;
   } catch {
@@ -58,7 +105,7 @@ export function readState(): GuardiansState | null {
 }
 
 /** Read state or create + persist a fresh one. */
-export function getState(): GuardiansState {
+export function getState(): AppStorageState {
   const existing = readState();
   if (existing) return existing;
   const fresh = defaultState();
@@ -72,7 +119,7 @@ export function getState(): GuardiansState {
  */
 export const getStoredState = getState;
 
-export function saveState(state: GuardiansState): GuardiansState {
+export function saveState(state: AppStorageState): AppStorageState {
   if (!canUseStorage()) {
     memoryState.value = state;
     return state;
@@ -86,53 +133,66 @@ export function saveState(state: GuardiansState): GuardiansState {
 }
 
 /** Set the player's name (first visit only). */
-export function setPlayerName(name: string): GuardiansState {
-  const state = getState();
-  return saveState({ ...state, playerName: name.trim() });
+export function saveUserName(name: string): AppStorageState {
+  return saveState({ ...getState(), userName: name.trim() });
 }
 
-/** Record an unlocked guardian card and return the updated state. */
-export function collectCard(guardianId: GuardianId, blessing: string): GuardiansState {
+/**
+ * Record an "awakened" guardian together with the answers collected during
+ * the multi-question ritual. Existing answers are merged, so a re-run of the
+ * ritual only updates the answered fields.
+ */
+export function awakenGuardian(
+  guardianId: GuardianId,
+  answers: Record<string, string>
+): AppStorageState {
   const state = getState();
-  const playerName = state.playerName.trim();
-
+  const existing = state.guardians[guardianId];
   return saveState({
     ...state,
-    playerName,
-    cards: {
-      ...state.cards,
+    guardians: {
+      ...state.guardians,
       [guardianId]: {
-        guardianId,
-        playerName,
-        blessing,
-        unlockedAt: new Date().toISOString(),
+        unlocked: true,
+        unlockedAt: existing.unlockedAt ?? new Date().toISOString(),
+        answers: { ...existing.answers, ...answers },
       },
     },
   });
 }
 
-export function hasCollected(guardianId: GuardianId): boolean {
-  return Boolean(getState().cards[guardianId]);
-}
-
-export function getCollectedCount(): number {
+/** Persist the completed 5th Guardian ceremony card (incl. the image). */
+export function submitFifthGuardian(
+  submission: Omit<FifthGuardianSubmission, "completedAt">
+): AppStorageState {
   const state = getState();
-  return GUARDIAN_ORDER.filter((id) => state.cards[id]).length;
+  const previous = state.fifthGuardian;
+  return saveState({
+    ...state,
+    fifthGuardian: {
+      talatphluBlessing: submission.talatphluBlessing,
+      personalPromise: submission.personalPromise,
+      finalImageUrl: submission.finalImageUrl,
+      completedAt: previous?.completedAt ?? new Date().toISOString(),
+    },
+  });
 }
 
-export function isComplete(): boolean {
-  return GUARDIAN_ORDER.every((id) => getState().cards[id] !== null);
+export function hasUnlocked(guardianId: GuardianId): boolean {
+  return getState().guardians[guardianId].unlocked;
 }
 
-/** Mark completion (set once on the /final-card page). */
-export function markCompleted(): GuardiansState {
+export function getUnlockedCount(): number {
   const state = getState();
-  if (GUARDIAN_ORDER.every((id) => state.cards[id])) {
-    if (!state.completedAt) {
-      return saveState({ ...state, completedAt: new Date().toISOString() });
-    }
-  }
-  return state;
+  return GUARDIAN_ORDER.filter((id) => state.guardians[id].unlocked).length;
+}
+
+export function isAwakeningComplete(): boolean {
+  return GUARDIAN_ORDER.every((id) => getState().guardians[id].unlocked);
+}
+
+export function isCeremonyDone(): boolean {
+  return Boolean(getState().fifthGuardian?.completedAt && getState().fifthGuardian?.finalImageUrl);
 }
 
 /** Wipe all progress (used by the demo reset control). */

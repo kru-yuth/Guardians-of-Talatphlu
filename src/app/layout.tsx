@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Guardians of Talatphlu · 4 ผู้พิทักษ์ตลาดพลู",
   description:
-    "เดินชมตลาดพลู สแกน QR เก็บพลัง 4 ธาตุ (ไฟ ดิน ลม น้ำ) และประกอบการ์ดใบที่ 5 ใบใหญ่กลางใจตลาด",
+    "เดินชมตลาดพลู สแกน QR ปลุกพลัง 4 ธาตุ (ไฟ ดิน ลม น้ำ) ผ่านคำถามแห่งพิธีกรรม และร่วมพิธีรวมร่างเป็นผู้พิทักษ์ตนที่ 5 กลางใจตลาด",
   applicationName: "Guardians of Talatphlu",
 };
 
