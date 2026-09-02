@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { pingFirestore } from '@/utils/analytics';
 
 interface CheckpointData {
   guardianId: string;
@@ -48,6 +49,21 @@ export default function CommunityDashboardPage() {
     total: 0,
   });
   const [wishTargets, setWishTargets] = useState<Record<string, number>>({});
+  const [pinging, setPinging] = useState(false);
+  const [pingResult, setPingResult] = useState<string | null>(null);
+
+  const handleTestPing = async () => {
+    setPinging(true);
+    setPingResult(null);
+    try {
+      const result = await pingFirestore();
+      setPingResult(`${result.ok ? '✅' : '❌'} ${result.message}`);
+    } catch (error) {
+      setPingResult(`❌ ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setPinging(false);
+    }
+  };
 
   useEffect(() => {
     // 1. Subscribe to Checkpoints Collection
@@ -78,19 +94,23 @@ export default function CommunityDashboardPage() {
       (error) => console.error('Error fetching checkpoints:', error)
     );
 
-    // 2. Subscribe to Fifth Guardian Submissions (Live Wall)
-    const qSubmissions = query(
-      collection(db, 'fifth_guardian_submissions'),
-      orderBy('createdAt', 'desc'),
-      limit(60)
-    );
+    // 2. Subscribe to Fifth Guardian Submissions (Live Wall).
+    // Index-free fetch (no orderBy) so no composite index needs building;
+    // we sort newest-first locally by clientTimestamp.
+    const qSubmissions = query(collection(db, 'fifth_guardian_submissions'), limit(100));
     const unsubSubmissions = onSnapshot(
       qSubmissions,
       (snapshot) => {
-        const list: FifthSubmissionData[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Omit<FifthSubmissionData, 'id'>),
-        }));
+        const list: FifthSubmissionData[] = snapshot.docs
+          .map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as Omit<FifthSubmissionData, 'id'>),
+          }))
+          .sort(
+            (a, b) =>
+              new Date(b.clientTimestamp ?? 0).getTime() -
+              new Date(a.clientTimestamp ?? 0).getTime()
+          );
         setSubmissions(list);
         setLoading(false);
       },
@@ -112,7 +132,10 @@ export default function CommunityDashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-stone-950 text-amber-50 p-4 md:p-8 max-w-6xl mx-auto font-sans">
+    <main
+      className="min-h-screen bg-stone-950 text-amber-50 p-4 md:p-8 max-w-6xl mx-auto font-sans"
+      style={{ fontFamily: "'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif" }}
+    >
       {/* Header */}
       <header className="text-center py-6 border-b border-amber-500/20 mb-8">
         <div className="inline-flex items-center gap-2 bg-amber-950/60 border border-amber-500/40 rounded-full px-4 py-1 text-xs font-semibold text-amber-300 mb-3">
@@ -127,31 +150,58 @@ export default function CommunityDashboardPage() {
         </p>
       </header>
 
+      {/* Direct Test Write to Firestore (temporary diagnostic) */}
+      <button
+        onClick={async () => {
+          try {
+            const { collection, addDoc, serverTimestamp } = await import("firebase/firestore");
+            const { db } = await import("@/lib/firebase");
+            const ref = await addDoc(collection(db, "guardian_checkpoints"), {
+              guardianId: "fire",
+              guardianName: "Lion Guardian",
+              element: "Fire",
+              userName: "Test User",
+              answers: { test: "ping" },
+              createdAt: serverTimestamp(),
+              clientTimestamp: new Date().toISOString(),
+            });
+            alert("Ping successful! Doc ID: " + ref.id);
+          } catch (err) {
+            const e = err as { message?: string };
+            console.error("Ping Failed:", err);
+            alert("Ping failed: " + (e?.message ?? String(err)));
+          }
+        }}
+        className="mb-4 rounded bg-red-600 px-4 py-2 text-xs font-bold text-white"
+      >
+        🛠 Test Write to Firestore
+      </button>
+
       {/* KPI Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div className="bg-stone-900/80 border border-orange-600/30 rounded-2xl p-4 text-center">
-          <span className="text-3xl">🐅</span>
+          <EarthIcon className="mx-auto size-8" />
           <p className="text-xs text-stone-400 mt-1">ผู้พิทักษ์ปฐพี (เสือ)</p>
           <p className="text-2xl md:text-3xl font-bold text-orange-400 mt-1">{checkpointStats.earth}</p>
           <span className="text-[10px] text-stone-500">{getPercentage(checkpointStats.earth)}% ของทั้งหมด</span>
         </div>
 
         <div className="bg-stone-900/80 border border-red-600/30 rounded-2xl p-4 text-center">
-          <span className="text-3xl">🦁</span>
+          <FireIcon className="mx-auto size-8" />
           <p className="text-xs text-stone-400 mt-1">ผู้พิทักษ์เปลวไฟ (สิงโต)</p>
           <p className="text-2xl md:text-3xl font-bold text-red-400 mt-1">{checkpointStats.fire}</p>
           <span className="text-[10px] text-stone-500">{getPercentage(checkpointStats.fire)}% ของทั้งหมด</span>
         </div>
 
         <div className="bg-stone-900/80 border border-emerald-600/30 rounded-2xl p-4 text-center">
-          <span className="text-3xl">🐉</span>
+          <WaterIcon className="mx-auto size-8" />
           <p className="text-xs text-stone-400 mt-1">ผู้พิทักษ์สายน้ำ (มังกร)</p>
           <p className="text-2xl md:text-3xl font-bold text-emerald-400 mt-1">{checkpointStats.water}</p>
           <span className="text-[10px] text-stone-500">{getPercentage(checkpointStats.water)}% ของทั้งหมด</span>
         </div>
 
         <div className="bg-stone-900/80 border border-sky-600/30 rounded-2xl p-4 text-center">
-          <span className="text-3xl">🐎</span>
+          <WindIcon className="mx-auto size-8" />
           <p className="text-xs text-stone-400 mt-1">ผู้พิทักษ์สายลม (ม้า)</p>
           <p className="text-2xl md:text-3xl font-bold text-sky-400 mt-1">{checkpointStats.wind}</p>
           <span className="text-[10px] text-stone-500">{getPercentage(checkpointStats.wind)}% ของทั้งหมด</span>
@@ -168,6 +218,33 @@ export default function CommunityDashboardPage() {
         <div className="text-4xl font-extrabold text-amber-300 bg-black/40 px-6 py-3 rounded-xl border border-amber-500/30">
           {submissions.length} <span className="text-xs font-normal text-stone-400">คน</span>
         </div>
+      </div>
+
+      {/* Firestore Connectivity Test (temporary diagnostic) */}
+      <div className="mb-8 rounded-2xl border border-stone-800 bg-stone-900/40 p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">
+              🔌 การเชื่อมต่อ Firestore (Test Ping)
+            </p>
+            <p className="text-[11px] text-stone-500 mt-0.5">
+              ตรวจสอบว่าเว็บเขียนข้อมูลลง Firestore ได้จริงหรือไม่ (debug)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleTestPing}
+            disabled={pinging}
+            className="shrink-0 rounded-xl border border-amber-500/40 bg-amber-950/40 px-4 py-2 text-xs font-bold text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-50"
+          >
+            {pinging ? 'กำลังตรวจ...' : '🔍 Test Firestore Ping'}
+          </button>
+        </div>
+        {pingResult && (
+          <p className="mt-3 rounded-lg border border-stone-800 bg-stone-950/60 px-3 py-2 text-[11px] leading-relaxed text-amber-100 break-words">
+            {pingResult}
+          </p>
+        )}
       </div>
 
       {/* Wish Target Distribution Section */}
@@ -244,5 +321,56 @@ export default function CommunityDashboardPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function IconProps({ className }: { className?: string }) {
+  return {
+    className,
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    viewBox: '0 0 24 24',
+    'aria-hidden': true,
+  };
+}
+
+function EarthIcon({ className }: { className?: string }) {
+  return (
+    <svg {...IconProps({ className })}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a13.5 13.5 0 0 1 0 18 13.5 13.5 0 0 1 0-18Z" />
+    </svg>
+  );
+}
+
+function FireIcon({ className }: { className?: string }) {
+  return (
+    <svg {...IconProps({ className })}>
+      <path d="M12 3c1 3-1.5 4.5-1.5 7a3 3 0 0 0 3 3c1 0 1.5-.5 1.5-.5C15.5 13 16 14.5 16 16a4 4 0 0 1-8 0c0-3 1.5-5.5 4-8 0 1 1.5 1 2-.5L12 3Z" />
+    </svg>
+  );
+}
+
+function WaterIcon({ className }: { className?: string }) {
+  return (
+    <svg {...IconProps({ className })}>
+      <path d="M12 22a7 7 0 0 0 7-7c0-5-4.5-9-7-11C9.5 6 5 10 5 15a7 7 0 0 0 7 7Z" />
+      <path d="M12 22a3 3 0 0 0 3-3c0-2-1.5-3.5-3-5-1.5 1.5-3 3-3 5a3 3 0 0 0 3 3Z" />
+    </svg>
+  );
+}
+
+function WindIcon({ className }: { className?: string }) {
+  return (
+    <svg {...IconProps({ className })}>
+      <path d="M17.5 9a3.5 3.5 0 1 0-3.5-3.5" />
+      <circle cx="12" cy="9" r="3" />
+      <path d="M4 9h5" />
+      <path d="M2 14h13a3 3 0 1 1-3 3" />
+    </svg>
   );
 }

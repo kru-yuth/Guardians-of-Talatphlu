@@ -76,7 +76,7 @@ export default function ScanClient({ guardian }: { guardian: GuardianMeta }) {
     setStage("questions");
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     const q = currentQuestion;
     if (!q) return;
     if (!(answers[q.id] ?? "").trim()) {
@@ -88,14 +88,14 @@ export default function ScanClient({ guardian }: { guardian: GuardianMeta }) {
     if (questionIndex < questions.length - 1) {
       setQuestionIndex((i) => i + 1);
     } else {
-      awaken(guardian.id, answers);
-      void logCheckpointCompletion({
+      await logCheckpointCompletion({
         userName: userName || "ผู้ไม่ประสงค์ออกนาม",
         guardianId: guardian.id,
         guardianName: guardian.name,
         element: guardian.element,
         answers,
       });
+      awaken(guardian.id, answers);
       setJustAwakened(true);
       setStage("awakened");
     }

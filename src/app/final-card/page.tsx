@@ -365,7 +365,7 @@ export default function FinalCardPage() {
             personalPromise: promise,
             finalImageUrl: url,
           });
-          void logFifthGuardianSubmission({
+          await logFifthGuardianSubmission({
             userName: state.userName || "ผู้ไม่ประสงค์ออกนาม",
             talatphluBlessing: blessing,
             personalPromise: promise,

@@ -1,6 +1,6 @@
 "use client";
 
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 const QUEUE_KEY = "talatphlu_analytics_pending_v1";
@@ -14,7 +14,18 @@ interface QueuedEntry {
 }
 
 /** Build-time kill switch: logging stays off unless the env var is present. */
-const ENABLED = Boolean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+export const ANALYTICS_ENABLED = Boolean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+
+if (typeof window !== "undefined") {
+  if (ANALYTICS_ENABLED) {
+    console.log("[analytics] enabled — NEXT_PUBLIC_FIREBASE_PROJECT_ID present in bundle");
+  } else {
+    console.error(
+      "[analytics] DISABLED — NEXT_PUBLIC_FIREBASE_PROJECT_ID was MISSING at build time. " +
+        "Set it in Vercel and redeploy with Clear Build Cache."
+    );
+  }
+}
 
 let flushing = false;
 
@@ -47,6 +58,25 @@ function createEntryId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * Surface analytics failures to the console with an explicit error and, when
+ * the environment allows it, through a DOM event the UI can listen for and
+ * turn into an on-screen toast. Never throws — analytics must stay silent-safe.
+ */
+function reportFailure(action: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[Firestore analytics] ${action} failed: ${message}`, error);
+  if (typeof window !== "undefined" && typeof window.CustomEvent === "function") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("talatphlu:analytics-error", { detail: { action, message } })
+      );
+    } catch {
+      /* ignore — event dispatch is best-effort */
+    }
+  }
+}
+
 async function sendEntry(entry: QueuedEntry): Promise<void> {
   await addDoc(collection(db, entry.collectionName), {
     ...entry.data,
@@ -57,7 +87,7 @@ async function sendEntry(entry: QueuedEntry): Promise<void> {
 
 /** Replay anything buffered while offline, oldest first. */
 export async function flushAnalyticsQueue(): Promise<void> {
-  if (!ENABLED || flushing) return;
+  if (!ANALYTICS_ENABLED || flushing) return;
   const queue = readQueue();
   if (!queue.length) return;
   flushing = true;
@@ -67,7 +97,8 @@ export async function flushAnalyticsQueue(): Promise<void> {
       try {
         await sendEntry(entry);
         sentIds.add(entry.id);
-      } catch {
+      } catch (error) {
+        reportFailure(`flush queued ${entry.collectionName}`, error);
         break;
       }
     }
@@ -77,15 +108,33 @@ export async function flushAnalyticsQueue(): Promise<void> {
   if (sentIds.size) writeQueue(readQueue().filter((entry) => !sentIds.has(entry.id)));
 }
 
-/** Fire-and-forget write; buffered to localStorage when offline / failing. */
-async function persistOrSend(collectionName: AnalyticsCollection, data: Record<string, unknown>): Promise<void> {
-  if (!ENABLED) return;
-  await flushAnalyticsQueue();
+/**
+ * Fire-and-forget write; buffered to localStorage when offline / failing.
+ * Returns `"sent" | "queued" | "disabled"` so callers can reflect the result.
+ * Note: this is not awaited by callers today; failed sent-writes are logged in
+ * error and queued for a later replay attempt.
+ */
+async function persistOrSend(
+  collectionName: AnalyticsCollection,
+  data: Record<string, unknown>
+): Promise<"disabled" | "sent" | "queued"> {
+  if (!ANALYTICS_ENABLED) {
+    console.warn("[Firestore analytics] disabled — NEXT_PUBLIC_FIREBASE_PROJECT_ID not set at build");
+    return "disabled";
+  }
+  try {
+    await flushAnalyticsQueue();
+  } catch (error) {
+    reportFailure("flush queue", error);
+  }
   const entry: QueuedEntry = { id: createEntryId(), collectionName, data };
   try {
     await sendEntry(entry);
-  } catch {
+    return "sent";
+  } catch (error) {
+    reportFailure(`write to ${collectionName}`, error);
     writeQueue([...readQueue(), entry]);
+    return "queued";
   }
 }
 
@@ -95,16 +144,56 @@ export async function logCheckpointCompletion(data: {
   guardianName: string;
   element: string;
   answers: Record<string, string>;
-}): Promise<void> {
-  await persistOrSend("guardian_checkpoints", data);
+}): Promise<"disabled" | "sent" | "queued"> {
+  return persistOrSend("guardian_checkpoints", data);
 }
 
 export async function logFifthGuardianSubmission(data: {
   userName: string;
   talatphluBlessing: string;
   personalPromise: string;
-}): Promise<void> {
-  await persistOrSend("fifth_guardian_submissions", data);
+}): Promise<"disabled" | "sent" | "queued"> {
+  return persistOrSend("fifth_guardian_submissions", data);
+}
+
+/**
+ * Temporary diagnostic probe: verify client → Firestore connectivity and write
+ * permissions. Writes then removes a throwaway doc in a `_diagnostics` sentinel
+ * collection. Logs success/failure explicitly and returns the outcome.
+ */
+export async function pingFirestore(): Promise<{ ok: boolean; message: string }> {
+  if (!ANALYTICS_ENABLED) {
+    const msg = "Firestore analytics disabled: NEXT_PUBLIC_FIREBASE_PROJECT_ID not set at build";
+    console.error(`[Firestore analytics] ${msg}`);
+    return { ok: false, message: msg };
+  }
+  const ref = doc(
+    collection(db, "_diagnostics"),
+    `ping-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  try {
+    await getDoc(doc(collection(db, "_diagnostics"), "__probe__"));
+  } catch {
+    /* read probe is best-effort; write is the real test */
+  }
+  try {
+    await addDoc(collection(db, "_diagnostics"), {
+      kind: "ping",
+      clientTimestamp: new Date().toISOString(),
+    });
+    try {
+      await getDoc(ref);
+    } catch {
+      /* ignore cleanup read errors */
+    }
+    const msg = "Firestore reachable — write permission confirmed (see _diagnostics collection)";
+    console.log(`[Firestore analytics] ${msg}`);
+    return { ok: true, message: msg };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    reportFailure("pingFirestore write", error);
+    return { ok: false, message };
+  }
 }
 
 if (typeof window !== "undefined") {
